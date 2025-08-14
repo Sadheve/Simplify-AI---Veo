@@ -724,7 +724,7 @@ footer p.credit {
   opacity: 0.9;
 }
 
-/* --- Terms Modal --- */
+/* --- Terms & API Key Modals --- */
 .modal-overlay {
   position: fixed;
   top: 0;
@@ -772,43 +772,9 @@ footer p.credit {
   color: var(--text-secondary);
   line-height: 1.6;
 }
-#terms-agree-button {
-  padding: 10px 20px;
-  font-family: var(--font-family);
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--text-on-accent);
-  background-color: var(--accent-color);
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s ease-in-out;
-  margin-top: 1rem;
-  align-self: center;
+.modal-content a {
+    color: var(--accent-color);
+    text-decoration: none;
+    font-weight: 500;
 }
-#terms-agree-button:hover {
-  background-color: var(--accent-hover);
-}
-
-
-@media (max-width: 600px) {
-  body {
-    padding: 0.5rem;
-  }
-  header {
-    margin-bottom: 1.5rem;
-  }
-  h1 {
-    font-size: 1.75rem;
-  }
-  .controls-section, .output-section {
-    padding: 1rem;
-    border-radius: 8px;
-  }
-  .content-wrapper {
-    gap: 1.5rem;
-  }
-  .output-section {
-    min-height: 300px;
-  }
-}
+.modal-content

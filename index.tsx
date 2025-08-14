@@ -38,6 +38,10 @@ const historyGrid = document.querySelector('#history-grid') as HTMLDivElement;
 const termsModalOverlay = document.querySelector('#terms-modal-overlay') as HTMLDivElement;
 const termsAgreeButton = document.querySelector('#terms-agree-button') as HTMLButtonElement;
 
+const apiKeyModalOverlay = document.querySelector('#api-key-modal-overlay') as HTMLDivElement;
+const apiKeyInput = document.querySelector('#api-key-input') as HTMLInputElement;
+const saveApiKeyButton = document.querySelector('#save-api-key-button') as HTMLButtonElement;
+
 
 // --- STATE ---
 type HistoryItem = {
@@ -51,6 +55,7 @@ let isVideoDailyLimitReached = false; // For the hard daily video limit
 let countdownInterval: number | null = null;
 let uploadedImage: { data: string; mimeType: string; } | null = null;
 let history: HistoryItem[] = [];
+let apiKey: string | null = null;
 
 let examplePrompts = [
   'A cinematic shot of a an astronaut riding a horse on Mars',
@@ -64,6 +69,7 @@ let isGeneratingNewPrompts = false;
 
 // --- API ---
 let ai: GoogleGenAI;
+const API_KEY_STORAGE_KEY = 'gemini-api-key';
 
 // --- ERROR HANDLING ---
 
@@ -95,23 +101,6 @@ function analyzeApiError(error: any): { type: 'VIDEO_DAILY_LIMIT' | 'HIGH_DEMAND
  * Initializes the application, sets up event listeners, and loads history.
  */
 async function init() {
-    if (!process.env.API_KEY) {
-        setStatus('API Key not found. Please set the `API_KEY` environment variable. You can get a key from Google AI Studio.');
-        isGenerating = true; // Block all generation features
-        updateUIState();
-        return;
-    }
-
-    try {
-        ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    } catch (e) {
-        setStatus('Failed to initialize AI. Check your API Key.');
-        isGenerating = true; // Block generation
-        console.error(e);
-        updateUIState();
-        return; // Stop initialization
-    }
-
     // Event Listeners
     generateButton.addEventListener('click', handleGenerateClick);
     refreshButton.addEventListener('click', getNewExamplePrompts);
@@ -124,13 +113,82 @@ async function init() {
     closeHistoryButton.addEventListener('click', () => historyPanel.classList.remove('visible'));
     promptInput.addEventListener('input', updateUIState);
     termsAgreeButton.addEventListener('click', handleTermsAgree);
+    saveApiKeyButton.addEventListener('click', handleSaveApiKey);
+    apiKeyInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') handleSaveApiKey();
+    });
 
-
-    // Initial Setup
+    // Initial Setup - UI is disabled until API key is validated
+    isGenerating = true; 
+    updateUIState();
+    
     initIntroAnimation();
     loadHistory();
-    await populateExamplePrompts();
-    handleModeChange();
+
+    const storedApiKey = localStorage.getItem(API_KEY_STORAGE_KEY);
+    if (storedApiKey) {
+        await initializeAppWithKey(storedApiKey);
+    } else {
+        apiKeyModalOverlay.classList.add('visible');
+    }
+}
+
+/**
+ * Initializes the Google AI client and enables the app features after key validation.
+ * @param key The Google Gemini API key.
+ */
+async function initializeAppWithKey(key: string) {
+    apiKey = key;
+    const tempAi = new GoogleGenAI({ apiKey });
+
+    try {
+        // A lightweight check to see if the key is valid by making a simple request.
+        await tempAi.models.generateContent({ model: 'gemini-2.5-flash', contents: 'test' });
+        
+        // Validation succeeded. Set the main 'ai' instance and store the key.
+        ai = tempAi;
+        localStorage.setItem(API_KEY_STORAGE_KEY, key);
+
+        isGenerating = false;
+        await populateExamplePrompts(); 
+        handleModeChange();
+        updateUIState(); 
+
+        apiKeyModalOverlay.classList.remove('visible');
+        setStatus(''); // Clear any previous error status
+    } catch (e) {
+        console.error("API Key validation failed:", e);
+        setStatus('API Key is invalid or has insufficient quota. Please try again.');
+        isGenerating = true;
+        updateUIState();
+        
+        localStorage.removeItem(API_KEY_STORAGE_KEY);
+        apiKey = null;
+        apiKeyInput.value = '';
+        apiKeyModalOverlay.classList.add('visible');
+    }
+}
+
+/**
+ * Handles saving the API key from the modal, triggering validation.
+ */
+async function handleSaveApiKey() {
+    const key = apiKeyInput.value.trim();
+    if (!key) {
+        alert('Please enter an API key.');
+        return;
+    }
+
+    saveApiKeyButton.disabled = true;
+    saveApiKeyButton.textContent = 'Verifying...';
+    
+    await initializeAppWithKey(key);
+
+    // If initialization failed, the modal is shown again. Re-enable the button.
+    if (!ai) { 
+      saveApiKeyButton.disabled = false;
+      saveApiKeyButton.textContent = 'Save and Start';
+    }
 }
 
 /**
@@ -154,7 +212,7 @@ function initIntroAnimation() {
 function showTermsModalIfNeeded() {
     // Use a short delay to let the main UI animation start gracefully before showing the modal
     setTimeout(() => {
-        if (sessionStorage.getItem('termsAccepted') !== 'true') {
+        if (sessionStorage.getItem('termsAccepted') !== 'true' && !apiKeyModalOverlay.classList.contains('visible')) {
             termsModalOverlay.classList.add('visible');
         }
     }, 500); // 500ms delay
@@ -205,9 +263,11 @@ function updateUIState() {
   promptInput.disabled = isGenerating;
   refreshButton.disabled = isGenerating || isGeneratingNewPrompts;
 
-  if (isGenerating) {
+  if (isGenerating && ai) { // Only show 'Generating...' if AI is initialized
     generateButton.textContent = 'Generating...';
     generateButton.disabled = true;
+  } else if (!ai) { // If AI not ready
+    generateButton.textContent = 'Setup Required';
   } else {
     generateButton.textContent = 'Generate';
     if (videoModeRadio.checked && isVideoDailyLimitReached) {
@@ -230,7 +290,7 @@ function updateUIState() {
  * Handles the click event on the main "Generate" button.
  */
 async function handleGenerateClick() {
-  if (isGenerating || promptInput.value.trim().length === 0) return;
+  if (isGenerating || promptInput.value.trim().length === 0 || !ai) return;
 
   isGenerating = true;
   updateUIState();
@@ -390,7 +450,7 @@ async function generateVideo() {
         throw new Error("Video URI not found in the successful operation response.");
     }
     
-    const videoResponse = await fetch(`${videoUri}&key=${process.env.API_KEY}`);
+    const videoResponse = await fetch(`${videoUri}&key=${apiKey}`);
     const videoBlob = await videoResponse.blob();
     const videoDataUrl = URL.createObjectURL(videoBlob);
     
@@ -476,6 +536,7 @@ async function populateExamplePrompts() {
  * Fetches new creative prompts from the Gemini API.
  */
 async function getNewExamplePrompts() {
+    if (!ai) return; // Don't run if AI is not initialized
     isGeneratingNewPrompts = true;
     refreshButton.classList.add('loading');
     updateUIState();
